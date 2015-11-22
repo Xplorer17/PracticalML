@@ -1,0 +1,126 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Naveen Agarwal"
+date: "22 November 2015"
+output: html_document
+---
+
+#### Executive Summary
+
+This project is done as part of the requirement in the Practical Machine Learning course in the Data Science Specialization on Coursera.
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+In this project, our goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. Using machine learning techniques we will predict the manner in which the participants did the exercise.
+
+After trying several machine learning algorithms like "rpart", "randomForest"and "gbm", I found "randomForest" algorithm to be the best performer for all accuracy parameters. 
+
+The randomForest algorithm gives 0% in-sample error and an expected 2.447% out-sample error rate.
+
+In this report, I'll illustrate how I built the model, used cross-validation, and why I made the choices that I did.
+
+#### Loading data into the R environment
+
+Assuming you have downloaded the Train and Test files into your working directory
+
+```{r, cache=TRUE}
+wd <- getwd()
+QTrain <- read.csv(paste(wd, "Qtrain.csv", sep = "/"), stringsAsFactors = F)
+QTest <- read.csv(paste(wd, "Qtest.csv", sep = "/"), stringsAsFactors = F)
+## Look at the dimensions of the data.
+dim(QTrain)
+dim(QTest)
+```
+
+#### Remove insignificant variables
+
+```{r, cache=TRUE}
+x <- lapply(QTrain, function(x) sum(x == "" | is.na(x)))
+y <- lapply(QTest, function(x) sum(x == "" | is.na(x)))
+## Let's look at the percentage of missing values in each variable
+sapply(x,FUN = function(x) round((x/19622)*100,2))
+## Let's remove all variables with missing values
+Train <- QTrain[,names(x[x == 0])]
+Test <- QTest[,names(y[y==0])]
+```
+
+The first seven variables are either cateogrical or datetime variable.
+
+```{r, cache=TRUE}
+## Some exploratory analysis
+table(Train$user_name, Train$classe)
+table(Train$new_window, Train$classe)
+table(Test$user_name); table(Test$new_window); 
+## Looks like only user_name will be meaningful in predicting the classe variable.
+## There is only one factor for new_window variable in the test set.
+## The variable num_window will create too many factors to handle.
+```
+
+Retain user_name variable and exclude all of the first seven variables
+
+
+```{r, cache=TRUE}
+NTrain <- Train[,c(2,8:60)]
+NTrain$user_name <- factor(NTrain$user_name)
+NTest <- Test[,c(2,8:60)]
+NTest$user_name <- factor(NTest$user_name)
+```
+
+#### Data Splitting
+
+Split NTrain into train set and test set with 80% for training and 20% for testing
+
+```{r, cache=TRUE,message=FALSE}
+library(caret)
+set.seed(123)
+tInd <- createDataPartition(NTrain$classe, p = .8, list = FALSE)
+tTrain <- NTrain[tInd,]
+tTest <- NTrain[-tInd,]
+```
+
+#### Preprocessing
+
+Preprocess with PCA for statical significance and data compression objectives.
+
+```{r, cache=TRUE}
+preObj <- preProcess(tTrain[,-54], method = "pca")
+tTrainPC <- predict(preObj, tTrain[,-54])
+## Use same Preprocessing on the test sets.
+tTestPC <- predict(preObj, tTest[,-54])
+NTestPC <- predict(preObj,NTest[,-54])
+dim(tTrainPC) ## Number of components.
+```
+
+#### Supervised learning with in built cross validation
+
+Use random forest algorithm with 10-fold cross validation to train the tTrain dataset with the principal components in the tTrainPC dataset.
+
+```{r, cache=TRUE}
+rfFit <- train(tTrain$classe ~ ., tTrainPC, method = "rf", trControl = trainControl(method = "cv", number = 10))
+## Let's look at the final model parameters.
+plot(rfFit)
+rfFit$finalModel
+plot(rfFit$finalModel)
+```
+
+#### Check in-sample and out-of-sample error rates.
+
+```{r, cache=TRUE}
+confusionMatrix(tTrain$classe, predict(rfFit, tTrainPC, type = "raw"))
+confusionMatrix(tTest$classe, predict(rfFit, tTestPC, type = "raw"))
+
+## In-sample error rate
+1 - confusionMatrix(tTrain$classe, predict(rfFit, tTrainPC, type = "raw"))$overall[1]
+
+## Expected out-of-sample error rate.
+1 - confusionMatrix(tTest$classe, predict(rfFit, tTestPC, type = "raw"))$overall[1]
+```
+
+#### Predicting Test Cases
+
+```{r, cache=TRUE}
+## Use the random forest model to predict classe for each of the 20 cases in the test set.
+predict(rfFit, NTestPC, type = "raw")
+```
+
+
